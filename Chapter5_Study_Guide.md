@@ -79,7 +79,7 @@ Application → TCP → IP → LLC → [802.11 MAC | 802.11 PHY]
 
 ```
 PMD  (Physical Medium Dependent)    — modulation, coding
-PLCP (Physical Layer Convergence Protocol) — CCA, SAP
+PLCP (Physical Layer Convergence Protocol) — Clear channel assesment (CCA), Service access point (SAP)
 MAC  (Medium Access Control)        — access, fragmentation, encryption
 LLC  (Logical Link Control)         — interface to higher layers
 MAC Management                      — association, roaming, auth, power mgmt
@@ -116,90 +116,154 @@ Station Management                  — coordinates all management functions
 - EU: 100 mW EIRP, min 1 mW
 - Japan: 10 mW/MHz
 
+---
+
 **FHSS PHY:**
 - 79 channels of 1 MHz each (US/Europe)
 - Minimum 2.5 hops/s
 - Modulation: 2-level GFSK (1 Mbps) or 4-level GFSK (2 Mbps)
+
+**FHSS PHY Frame (PPDU):**
+
+```
++----------------------+------------------+-----+-----+------+----------+
+|    Synchronization   |       SFD        | PLW | PSF | HEC  |   PSDU   |
+|       (80 bits)      |    (16 bits)     | 12b |  4b | 16b  | variable |
++----------------------+------------------+-----+-----+------+----------+
+|<---- PLCP Preamble @ 1 Mbps ---------->|<-- PLCP Header @ 1 Mbps -->|<- payload @ 1 or 2 Mbps ->|
+```
+
+| Field | Size | Content |
+|-------|------|---------|
+| **Sync** | 80 bits | `010101…` pattern — bit synchronization & CCA signal |
+| **SFD** | 16 bits | `0000110010111101` — frame start delimiter |
+| **PLW** | 12 bits | Payload length in **bytes** (<4096), incl. 32-bit CRC of payload |
+| **PSF** | 4 bits | Data rate: `0000`=1 Mbps, `0010`=2 Mbps (granularity 500 kbps) |
+| **HEC** | 16 bits | CRC of PLCP header, polynomial x¹⁶+x¹²+x⁵+1 |
+| **PSDU** | variable | MAC data, scrambled with s(z)=z⁷+z⁴+1; ends with 32-bit CRC |
+
+---
+
+**CRC (Cyclic Redundancy Check)**
+
+**Purpose:** Detect transmission errors.
+
+**Concept:**
+- Sender: multiply data D by 2ⁿ, divide by generator polynomial, append **remainder**
+- Receiver: divide received frame by same polynomial → remainder = 0 means no error
+
+**Example (n=3, polynomial x³+x+1 → pattern 1011):**
+```
+Data D = 111001010  (k=9 bits)
+D · 2³ = 111001010000
+111001010000 ÷ 1011 → remainder = 010
+Frame sent: 111001010 010
+
+Receiver: 111001010010 ÷ 1011 → remainder = 0 → CHECK OK
+```
+
+**Key formulas:**
+- Frame size: k + n bits (k = data bits, n = redundancy bits)
+- Polynomial of order n → pattern of n+1 bits
+
+---
+
+**Scrambling**
+
+**Purpose:** DC blocking, spectral whitening, self-clocking (avoids long runs of 0s or 1s).
+
+**Concept:**
+- Sender: append n zeros to data (shift back n bits), divide by polynomial → **quotient** = scrambled data
+- Receiver: multiply scrambled data by polynomial, shift result forward n bits → original data
+
+**Example (n=3, polynomial z³+z+1 → pattern 1011, D=111001010):**
+```
+Sender:  111001010 000 ÷ 1011 → quotient = 110011110   (transmitted)
+Receiver: 110011110 × 1011 → shift 3 → 111001010       (recovered)
+```
+
+> **CRC vs. Scrambling:** CRC transmits the **remainder** appended after data (for error detection). Scrambling transmits the **quotient** in place of data (for spectral shaping — no extra bits added).
+
+**DSSS PHY scrambler polynomial:** s(z) = z⁷ + z⁴ + 1
+
+---
 
 **DSSS PHY:**
 - Barker code chipping sequence: `+1, -1, +1, +1, -1, +1, +1, +1, -1, -1, -1`
 - 11 Mchips/s
 - Modulation: DBPSK (1 Mbps), DQPSK (2 Mbps)
 
-#### 4.3 CRC (Cyclic Redundancy Check)
-
-**Purpose:** Detect transmission errors.
-
-**Concept:**
-- Sender: multiply data D by 2ⁿ, divide by generator polynomial, append remainder
-- Receiver: divide received frame by same polynomial → remainder = 0 means no error
-
-**Example (n=3, polynomial x³+x+1 → pattern 1011):**
-```
-Data D = 111001010 (9 bits)
-Transmitted = 111001010 | 010  (frame = D·2³ + remainder)
-Receiver divides by 1011 → remainder = 0 → OK
-```
-
-**Key formulas:**
-- Frame size: k + n bits (k = data, n = redundancy bits)
-- Polynomial of order n → pattern of n+1 bits
-
-#### 4.4 Scrambling
-
-**Purpose:** DC blocking, spectral whitening, self-clocking.
-
-**Concept:**
-- Sender: shift data back n bits, divide by polynomial → quotient = scrambled data
-- Receiver: multiply scrambled data by polynomial, shift forward n bits → original data
-
-**Note:** Unlike CRC (where remainder is transmitted), with scrambling the **quotient** is transmitted — there is no remainder appended.
-
-**DSSS PHY scrambler polynomial:** s(z) = z⁷ + z⁴ + 1
-
-#### 4.5 FHSS PHY Frame (PPDU)
+**DSSS PHY Frame (PPDU):**
 
 ```
-| Sync (80b) | SFD (16b) | PLW (12b) | PSF (4b) | HEC (16b) | PSDU (var) |
-|-- PLCP Preamble (1Mbps) --|--- PLCP Header (1Mbps) ---|-- payload --|
++----------------+----------+--------+---------+--------+------+----------+
+|  Sync (128 b)  | SFD (16b)| Sig 8b | Svc  8b | Len 16b| HEC  |   PSDU   |
++----------------+----------+--------+---------+--------+------+----------+
+|<-- Preamble @1Mbps ------>|<------- Header @ 1 Mbps ------->|<-payload->|
 ```
-- **Sync:** 01010101... for bit sync and CCA
-- **SFD:** frame sync pattern `0000110010111101`
-- **PLW:** payload length in bytes (<4096); includes 32-bit CRC of payload
-- **PSF:** data rate (0000 = 1 Mbps, 0010 = 2 Mbps)
-- **HEC:** 16-bit CRC of PLCP header using polynomial x¹⁶+x¹²+x⁵+1
 
-#### 4.6 DSSS PHY Frame (PPDU)
+| Field | Size | Content |
+|-------|------|---------|
+| **Sync** | 128 bits | Scrambled 1-bits — sync, gain setting, energy detection (CCA), freq offset compensation |
+| **SFD** | 16 bits | `1111001110100000` — frame start delimiter |
+| **Signal** | 8 bits | Data rate: `0x0A`=1 Mbps (DBPSK), `0x14`=2 Mbps (DQPSK), in multiples of 100 kbps |
+| **Service** | 8 bits | `0x00` for 802.11-compliant frame; reserved for future use |
+| **Length** | 16 bits | Payload duration in **microseconds** (<65536 µs = 2¹⁶) |
+| **HEC** | 16 bits | CRC of Signal+Service+Length, polynomial x¹⁶+x¹²+x⁵+1 |
+| **PSDU** | variable | MAC data; **all** PHY bits scrambled with s(z)=z⁷+z⁴+1 |
 
-```
-| Sync (128b) | SFD (16b) | Signal (8b) | Service (8b) | Length (16b) | HEC (16b) | PSDU (var) |
-|--- PLCP Preamble (1Mbps) ---|---------  PLCP Header (1Mbps) -------------|-- payload --|
-```
-- **Sync:** scrambled 1-bits for sync, energy detection, frequency offset compensation
-- **SFD:** `1111001110100000`
-- **Signal:** data rate (0x0A = 1 Mbps DBPSK; 0x14 = 2 Mbps DQPSK)
-- **Length:** payload length in **microseconds** (<65536 µs)
-- All PHY bits are scrambled with s(z) = z⁷+z⁴+1
+> **FHSS vs. DSSS frame — key differences:**
+> - PLW (FHSS) gives length in **bytes**; Length (DSSS) gives duration in **µs**
+> - FHSS Sync = `010101…`; DSSS Sync = scrambled 1-bits
+> - DSSS scrambles the entire frame (preamble included), FHSS only scrambles the payload
 
-#### 4.7 IEEE 802.11b: HR-DSSS (High Rate DSSS)
+#### 4.3 IEEE 802.11b: HR-DSSS (High Rate DSSS)
 
 **Key change:** CCK (Complementary Code Keying) for 5.5 and 11 Mbps
 
 **Rates:** 1 Mbps (DBPSK), 2 Mbps (DQPSK), 5.5 Mbps (CCK), 11 Mbps (CCK)
 
+**HR-DSSS PPDU frame (same fields for both Long and Short):**
+
+```
++-------------+----------+--------+---------+--------+------+----------+
+| Sync (128 b) | SFD (16b)| Sig 8b | Svc  8b | Len 16b | HEC |   PSDU   |
++-------------+----------+--------+---------+--------+------+----------+
+|<------ Preamble ------>|<------------- Header ------------->|< payload >|
+```
+
+| Field | Size | Content |
+|-------|------|---------|
+| **Sync** | 128 b (long) / 56 b (short) | Scrambled zeros — sync, gain, CCA |
+| **SFD** | 16 bits | Long: mirrored DSSS SFD `0000010111001111`; Short: `0000010111001111` inverted |
+| **Signal** | 8 bits | Rate: `0x0A`=1, `0x14`=2, `0x37`=5.5, `0x6E`=11 Mbps |
+| **Service** | 8 bits | Locked clocks bit, reserved |
+| **Length** | 16 bits | Payload duration in µs |
+| **HEC** | 16 bits | CRC of header |
+| **PSDU** | variable | Payload at 1 / 2 / 5.5 / 11 Mbps |
+
+**Long PPDU vs. Short PPDU:**
+
+| | Long PPDU | Short PPDU |
+|--|-----------|-----------|
+| Sync length | 128 bits | 56 bits |
+| Preamble rate | 1 Mbps DBPSK | 1 Mbps DBPSK |
+| Header rate | 1 Mbps | **2 Mbps** |
+| Total preamble + header | **192 µs** | **96 µs** |
+| Supported payload rates | 1, 2, 5.5, 11 Mbps | 2, 5.5, 11 Mbps (**not 1 Mbps**) |
+| Backward compatible with 802.11 | Yes | No (legacy 1 Mbps clients cannot decode short preamble) |
+| Use case | Default; required for 1 Mbps | Optional; halves overhead at higher rates |
+
 **Channel plan (2.4 GHz ISM band):**
 - 11–14 channels total (geography-dependent)
-- Channel spacing: 5 MHz
-- Channel bandwidth: 22 MHz
+- Channel spacing: 5 MHz; Channel bandwidth: 22 MHz
 - **3 non-overlapping channels:**
   - Europe: CH 1, 7, 13
   - US/Canada: CH 1, 6, 11
 
 **Range:** 300 m outdoor, 30 m indoor (max rate ~10 m indoor)
 
-**HR-DSSS frame:** Same structure as DSSS but with long preamble of 192 µs at 1 Mbps DBPSK; SFD is mirrored.
-
-#### 4.8 IEEE 802.11a: OFDM at 5 GHz
+#### 4.4 IEEE 802.11a: OFDM at 5 GHz
 
 **OFDM parameters:**
 - 64 subcarriers total; 52 used (48 data + 4 pilot)
@@ -220,25 +284,95 @@ Receiver divides by 1011 → remainder = 0 → OK
 
 Mandatory: 6, 12, 24 Mbps
 
+**How data rate is determined — worked example (BPSK @ 6 Mbps):**
+
+```
+48 data subcarriers × 1 bit/subcarrier (BPSK) × code rate 1/2 = 24 data bits/symbol
+Symbol rate = 1 / 4 µs = 250,000 symbols/s
+Data rate  = 24 bits × 250,000 symbols/s = 6,000,000 bps = 6 Mbps
+```
+
+General formula:
+```
+Data rate = N_data × bits/subcarrier × code rate × symbol rate
+          = 48 × b × r × 250,000
+```
+
+| Rate | Modulation | b (bits/sub) | r (code rate) | 48 × b × r | × 250k |
+|------|-----------|-------------|--------------|-----------|--------|
+| 6 Mbps | BPSK | 1 | 1/2 | 24 | 6 Mbps |
+| 9 Mbps | BPSK | 1 | 3/4 | 36 | 9 Mbps |
+| 12 Mbps | QPSK | 2 | 1/2 | 48 | 12 Mbps |
+| 24 Mbps | 16-QAM | 4 | 1/2 | 96 | 24 Mbps |
+| 54 Mbps | 64-QAM | 6 | 3/4 | 216 | 54 Mbps |
+
 **Frequency (Europe):** 5.15–5.35 GHz and 5.725–5.825 GHz  
 **Channel spacing:** 20 MHz  
 **Center frequency:** 5000 + 5 × channel_number [MHz]
 
-**802.11a PHY frame:**
-- Preamble: 16 µs (10 short + 2 long symbols) — for sync, channel estimation
-- Signal field: 1 OFDM symbol at 6 Mbps — carries rate, reserved, length (bytes), parity, tail
-- Data field: variable, at chosen rate
+**802.11a PHY frame (OFDM PPDU):**
+
+```
++-------------------+----------------+---------------------+
+|   PLCP Preamble   |  SIGNAL (1 sym)|     DATA (var)      |
+| 10 short + 2 long |    @ 6 Mbps    |  @ negotiated rate  |
+|     (16 µs)       |<- PLCP Header->|                     |
++-------------------+----------------+---------------------+
+```
+
+**SIGNAL field subfields (24 bits, 1 OFDM symbol @ 6 Mbps):**
+
+```
++------+----------+--------+--------+------+
+| Rate | Reserved | Length | Parity | Tail |
+|  4b  |    1b    |  12b   |   1b   |  6b  |
++------+----------+--------+--------+------+
+```
+
+| Subfield | Size | Content |
+|----------|------|---------|
+| **Rate** | 4 bits | Modulation + coding rate of DATA field |
+| **Length** | 12 bits | Number of bytes in PSDU (1–4095 bytes) |
+| **Parity** | 1 bit | Even parity for first 17 bits |
+| **Tail** | 6 bits | Six zero bits — resets the convolutional encoder |
+
+
+
+**DATA subfields**
+
+```
++---------+------+------+-----+
+| Service | PSDU | TAIL | PAD |
+|  16b    | VAR  |  6b  | VAR |
++---------+------+------+-----+
+```
+| Subfield | Size | Content |
+|----------|------|---------|
+| **Service** | 16 bits | sync descrambler at recv (also part of PLCP together with signal subfields) |
+| **PSDA** | var | Data |
+| **Tail** | 6 bits | Six zero bits — resets the convolutional encoder |
+| **Pad** | Var | round to nearest integer #OFDM symbol |
+
+
+**Preamble purpose:** 10 short symbols for frequency acquisition + AGC; 2 long symbols for fine channel estimation and synchronization.
 
 **Range examples at 5 GHz:** 54 Mbps ≤5 m, 36 Mbps ≤25 m, 18 Mbps ≤40 m, 12 Mbps ≤60 m
 
-#### 4.9 IEEE 802.11g: ERP (Extended Rate PHY) at 2.4 GHz
+#### 4.5 IEEE 802.11g: ERP (Extended Rate PHY) at 2.4 GHz
 
 - Combines HR-DSSS (for 1, 2, 5.5, 11 Mbps) with OFDM (for 6–54 Mbps) in 2.4 GHz
-- Same frame formats: Long/Short PPDU (from 802.11b) and ERP-OFDM PPDU (from 802.11a)
-- Greater range than 802.11a due to lower frequency (300 m outdoor, 30 m indoor)
+- **Three frame formats** depending on rate:
+
+```
+Long PPDU  (1/2/5.5/11 Mbps) — identical to 802.11b HR-DSSS Long PPDU
+Short PPDU (2/5.5/11 Mbps)   — identical to 802.11b HR-DSSS Short PPDU
+ERP-OFDM   (6–54 Mbps)       — identical to 802.11a OFDM PPDU
+```
+
+- Greater range than 802.11a (300 m outdoor) due to lower 2.4 GHz frequency
 - Heavy interference on 2.4 GHz ISM band
 
-#### 4.10 IEEE 802.11n: HT PHY (High Throughput)
+#### 4.6 IEEE 802.11n: HT PHY (High Throughput)
 
 **How 802.11n reaches 600 Mbps — step by step:**
 
@@ -253,10 +387,41 @@ Mandatory: 6, 12, 24 Mbps
 **Frequency:** 2.4 GHz AND 5 GHz  
 **Range:** 70–200 m indoor, 200–800 m outdoor
 
-**PHY frame formats:**
-- **Non-HT PPDU:** Same as 802.11a/g — backward compatible
-- **HT-Greenfield PPDU:** Optimized for 802.11n only; NOT backward compatible (causes collisions with 802.11a/g neighbors)
-- **HT-Mixed mode PPDU:** Combines non-HT preamble + new HT preamble; 802.11a/g clients can associate AND neighbors can decode preamble and back off — recommended for deployments with mixed clients
+**PHY frame formats — three modes:**
+
+**Non-HT PPDU** (backward compatible with 802.11a/g):
+```
++------------------+---------------+---------------------------+
+|  Legacy Preamble |  SIGNAL (L-SIG)|       DATA               |
+|    (16 µs)       |  1 OFDM sym   |    variable               |
++------------------+---------------+---------------------------+
+  802.11a/g clients can fully decode this frame
+```
+
+**HT-Greenfield PPDU** (802.11n only, NOT backward compatible):
+```
++-------------+-----------+-----------+-----------+------------+
+| HT-GF-STF  | HT-LTF 1  | HT-SIG    | HT-LTF 2+ |    DATA    |
+|  (8 µs)    |  (8 µs)   |  (8 µs)   | (variable)|  variable  |
++-------------+-----------+-----------+-----------+------------+
+  802.11a/g clients CANNOT decode → collisions with legacy neighbors!
+```
+
+**HT-Mixed Mode PPDU** (recommended for mixed environments):
+```
++------------------+-------+----------+-----------+----------+-----------+
+|  Legacy Preamble | L-SIG |  HT-SIG  | HT-STF   | HT-LTF   |   DATA    |
+|    (16 µs)       | 4 µs  | 8 µs     |  4 µs    | variable | variable  |
++------------------+-------+----------+-----------+----------+-----------+
+  Legacy part: 802.11a/g clients can read → association + NAV setting
+  HT part: 802.11n clients use new features
+```
+
+| Mode | Legacy compatible | Neighbors back off | Overhead |
+|------|------------------|--------------------|---------|
+| Non-HT | Yes | Yes | Low |
+| HT-Greenfield | No | No (collision risk!) | Lowest |
+| HT-Mixed | Yes | Yes | Medium |
 
 **MCS (Modulation and Coding Scheme):** single index encoding modulation + coding rate + stream count. Fast MCS feedback enables per-packet link adaptation.
 
@@ -590,80 +755,224 @@ Earlier 802.11 revisions focused on raw speed (higher PHY rate). **802.11ax** (W
 Throughput = Useful data bytes / Cycle duration
 ```
 
-**Useful data = IP payload** (not LLC, MAC, or PHY headers)
+**Useful data = IP payload only** — LLC, MAC, and PHY headers are overhead.
 
-#### 10.2 Frame Encapsulation Stack (from exercise slides)
-
-```
-Application data
-  + App header
-  + TCP/UDP header     → APP packet
-  + IP header          → TCP/UDP packet
-  + LLC header (8B)    → IP packet
-  + MAC header + CRC   → LLC packet (MSDU) → MPDU
-  + PHY header + tail + padding → MAC Frame (PSDU) → PPDU
-```
-
-#### 10.3 One Cycle: CSMA/CA (No RTS/CTS)
+#### 10.2 Frame Encapsulation Stack
 
 ```
-Cycle = DIFS + back-off + T_PHY_hdr + T_MAC_hdr + T_LLC_hdr + T_data + SIFS + T_PHY_hdr_ACK + T_ACK
+[ IP payload ]
+  + LLC header (8 B)                        → MSDU
+  + MAC header (24 B) + FCS (4 B)           → MPDU = PSDU
+  + PHY preamble+signal (20 µs fixed)       → PPDU
 ```
 
-Where:
-- DIFS = SIFS + 2 × T_slot
-- T_back-off = (CWmin/2) × T_slot (average: CWmin = 15 → avg back-off = 7.5 slots)
-- T_xxx = (frame size in bits) / PHY data rate
-- Preamble + signal field transmitted at 6 Mbps (base rate); payload at negotiated rate
+**Key frame sizes (802.11a):**
 
-#### 10.4 One Cycle: CSMA/CA with RTS/CTS
+| Frame | Size | Composition |
+|-------|------|-------------|
+| PHY preamble + signal | 20 µs | Always at 6 Mbps, independent of data rate |
+| MAC data header | 24 bytes | FC(2)+Dur(2)+Addr1(6)+Addr2(6)+Addr3(6)+SeqCtrl(2) |
+| FCS | 4 bytes | 32-bit CRC appended to MAC frame |
+| LLC header | 8 bytes | Wraps IP packet |
+| RTS | 20 bytes | FC(2)+Dur(2)+RA(6)+TA(6)+FCS(4) |
+| CTS / ACK | 14 bytes | FC(2)+Dur(2)+RA(6)+FCS(4) |
 
+**Timing parameters (802.11a):**
+
+| Parameter | Value | Derivation |
+|-----------|-------|-----------|
+| T_SIFS | 16 µs | PHY-defined |
+| T_slot | 9 µs | PHY-defined |
+| T_DIFS | 34 µs | SIFS + 2 × T_slot |
+| Avg back-off | 67.5 µs | (CWmin/2) × T_slot = (15/2) × 9 |
+| PHY rate | 54 Mbps | 64-QAM, code rate 3/4 |
+
+---
+
+#### 10.3 Exercise 1 — 802.11a, CSMA/CA, no RTS/CTS
+
+**Question:** Maximum IP throughput for 802.11a DFWMAC-DCF using CSMA/CA?
+One UDP sender, receiver close by (max bit rate, no errors, no propagation delay).
+IP packet = **1500 bytes** and **500 bytes**.
+
+**Step 1 — Build the PSDU (data frame):**
+```
+PSDU = MAC header + LLC + IP + FCS
+     = 24 + 8 + 1500 + 4 = 1536 bytes
+```
+
+**Step 2 — Compute transmission times:**
+```
+T_PHY       = 20 µs              (preamble + signal, fixed)
+T_PSDU      = (1536 × 8) / 54e6 = 12288 / 54e6 = 227.56 µs
+T_data      = T_PHY + T_PSDU   = 20 + 227.56   = 247.56 µs
+
+T_ACK_MPDU  = (14 × 8) / 54e6  = 112 / 54e6    = 2.07 µs
+T_ACK       = T_PHY + T_ACK_MPDU = 20 + 2.07   = 22.07 µs
+```
+
+**Step 3 — Sum the cycle:**
+```
+Cycle = DIFS + back-off + T_data + SIFS + T_ACK
+      = 34   + 67.5     + 247.56 + 16   + 22.07
+      = 387.13 µs
+```
+
+**Step 4 — Calculate throughput:**
+```
+Throughput = (1500 × 8) / 387.13 µs = 12000 / 387.13 ≈ 30.8 Mbps
+```
+
+**Repeat for 500-byte IP:**
+```
+PSDU        = 24 + 8 + 500 + 4 = 536 bytes
+T_PSDU      = (536 × 8) / 54e6 = 79.41 µs
+T_data      = 20 + 79.41       = 99.41 µs
+Cycle       = 34 + 67.5 + 99.41 + 16 + 22.07 = 238.98 µs
+Throughput  = (500 × 8) / 238.98 µs = 4000 / 238.98 ≈ 16.6 Mbps
+```
+
+> Smaller packets → same fixed overhead (DIFS, back-off, PHY headers, ACK) but less useful data → lower throughput efficiency.
+
+---
+
+#### 10.4 Exercise 2 — 802.11a, CSMA/CA + RTS/CTS, 1500 bytes
+
+**Step 1 — Additional frame times:**
+```
+T_RTS = T_PHY + (20 × 8)/54e6 = 20 + 2.96  = 22.96 µs
+T_CTS = T_PHY + (14 × 8)/54e6 = 20 + 2.07  = 22.07 µs
+```
+
+**Step 2 — Cycle with RTS/CTS:**
 ```
 Cycle = DIFS + back-off + T_RTS + SIFS + T_CTS + SIFS + T_data + SIFS + T_ACK
+      = 34   + 67.5     + 22.96 + 16   + 22.07 + 16   + 247.56 + 16   + 22.07
+      = 464.16 µs
 ```
 
-**Effect of RTS/CTS:** Adds two extra frames (RTS + CTS) per cycle → lower throughput for small packets but reduces collision probability in multi-station environments.
+**Step 3 — Throughput:**
+```
+Throughput = (1500 × 8) / 464.16 µs = 12000 / 464.16 ≈ 25.6 Mbps
+```
 
-#### 10.5 Fragmentation Impact
+> RTS/CTS adds ~77 µs overhead per cycle → lower single-sender throughput, but prevents hidden terminal collisions in multi-station setups.
 
-- Large payload fragmented into N fragments of size f_max
-- Each fragment: RTS + CTS + data_fragment + ACK (+ SIFSes)
-- Total cycle = N × fragment_cycle
-- More overhead per bit → lower throughput compared to no fragmentation
+---
 
-#### 10.6 Key Numbers for 802.11a (from exercises)
+#### 10.5 Exercise 3 — 802.11a, CSMA/CA + RTS/CTS + fragmentation (max 500 bytes), 1500 bytes
 
-| Parameter | Value |
-|-----------|-------|
-| T_SIFS | 16 µs |
-| T_slot | 9 µs |
-| T_DIFS | 34 µs |
-| CWmin | 15 |
-| Max PHY rate | 54 Mbps |
-| RTS frame | 20 bytes |
-| CTS/ACK frame | 14 bytes |
-| MAC header | 34 bytes |
-| LLC header | 8 bytes |
-| PHY preamble+signal | 16 µs + 4 µs = 20 µs |
+**Step 1 — Number of fragments:**
+```
+Max fragment PSDU = 500 bytes total → IP data per fragment = 500 - 24 - 8 - 4 = 464 bytes
+N = ceil(1500 / 464) = 4 fragments
+  → 3 × 464 B + 1 × 108 B of IP data
+```
 
-#### 10.7 Exercise Solutions Summary
+**Step 2 — Exchange structure (RTS/CTS covers whole burst):**
+```
+DIFS + back-off + T_RTS + SIFS + T_CTS
+  + SIFS + T_frag1 + SIFS + T_ACK1
+  + SIFS + T_frag2 + SIFS + T_ACK2
+  + SIFS + T_frag3 + SIFS + T_ACK3
+  + SIFS + T_frag4 + SIFS + T_ACK4
+```
+Each fragment after the first uses SIFS (no DIFS/back-off) because the Duration field in each fragment/ACK reserves the medium for the next.
 
-| Exercise | Setup | Throughput |
-|----------|-------|-----------|
-| 1 | 802.11a, CSMA/CA, 1500 B IP | 30.8 Mbps |
-| 1 | 802.11a, CSMA/CA, 500 B IP | 16.6 Mbps |
-| 2 | 802.11a, CSMA/CA + RTS/CTS, 1500 B | 25.6 Mbps |
-| 3 | 802.11a, CSMA/CA + RTS/CTS + frag ≤500 B | 16.7 Mbps |
-| 4 | 802.11a, CSMA/CA + RTS/CTS, 36 Mbps rate | 20.4 Mbps |
-| 5 | 802.11n, CSMA/CA, 2 spatial streams, 1500 B | 31.58 Mbps |
-| 6 | 802.11n, CSMA/CA, 2 SS, A-MPDU | 64.29 Mbps |
-| 6 | 802.11n, CSMA/CA, 2 SS, A-MSDU | 65.55 Mbps |
+**Step 3 — Throughput:**
+```
+Throughput ≈ 16.7 Mbps
+```
 
-**Key observations:**
-- RTS/CTS reduces throughput for a single sender (extra overhead), but becomes beneficial with hidden terminals
-- Fragmentation reduces throughput (more overhead per byte of useful data)
-- Frame aggregation (A-MPDU, A-MSDU) roughly doubles throughput by amortizing MAC overhead
+> Fragmentation adds a MAC header + FCS per fragment → more overhead per byte → lower throughput than no fragmentation (25.6 Mbps), but reduces retransmission size in lossy channels.
 
+---
+
+#### 10.6 Exercise 4 — 802.11a, CSMA/CA + RTS/CTS, 36 Mbps PHY rate
+
+Same as Exercise 2 but PHY data rate = **36 Mbps** (16-QAM, 3/4).
+
+```
+T_PSDU   = (1536 × 8) / 36e6  = 341.33 µs  →  T_data = 20 + 341.33 = 361.33 µs
+T_RTS    = 20 + (20 × 8)/36e6 = 20 + 4.44  = 24.44 µs
+T_CTS    = 20 + (14 × 8)/36e6 = 20 + 3.11  = 23.11 µs
+T_ACK    = 23.11 µs
+
+Cycle    = 34 + 67.5 + 24.44 + 16 + 23.11 + 16 + 361.33 + 16 + 23.11 = 581.49 µs
+Throughput = 12000 / 581.49 ≈ 20.4 Mbps
+```
+
+> Lower PHY rate stretches T_data and control frames → larger cycle → lower throughput.
+
+---
+
+#### 10.7 Exercise 5 — 802.11n, CSMA/CA, 2 spatial streams, 1500 bytes
+
+2SS at 64-QAM 5/6 short GI → PHY rate = **130 Mbps** (MCS 15).
+
+802.11n HT-Mixed mode PHY header = **40 µs** (legacy 20 µs + HT extension 20 µs).
+
+```
+T_PSDU   = (1536 × 8) / 130e6 = 94.52 µs
+T_data   = 40 + 94.52         = 134.52 µs
+T_ACK    = 40 + (14 × 8)/130e6 = 40 + 0.86 = 40.86 µs
+
+Cycle    = 34 + 67.5 + 134.52 + 16 + 40.86 = 292.88 µs
+Throughput = (1500 × 8) / 292.88 µs ≈ 31.58 Mbps
+```
+
+> PHY rate doubled vs. 802.11a, but larger PHY header (40 µs vs. 20 µs) partially cancels the gain. Throughput only slightly exceeds 802.11a (30.8 Mbps) for single small frames.
+
+---
+
+#### 10.8 Exercise 6 — 802.11n, CSMA/CA, 2SS, Frame Aggregation (N=16 packets)
+
+**A-MPDU** — 16 MPDUs bundled in one PPDU, one Block ACK:
+```
+Total PSDU  = 16 × (24 + 8 + 1500 + 4) = 16 × 1536 = 24576 bytes
+T_PSDU      = (24576 × 8) / 130e6       = 1512.37 µs
+T_data      = 40 + 1512.37              = 1552.37 µs
+T_BlockACK  = 40 + (32 × 8)/130e6      = 40 + 1.97 = 41.97 µs
+
+Cycle       = 34 + 67.5 + 1552.37 + 16 + 41.97 = 1711.84 µs
+Throughput  = (16 × 1500 × 8) / 1711.84 µs = 192000 / 1711.84 ≈ 64.29 Mbps
+```
+
+**A-MSDU** — 16 MSDUs merged under one MAC header, one ACK:
+```
+Total PSDU  = 24 + 16 × (8 + 1500) + 4 = 24 + 24128 + 4 = 24156 bytes
+T_PSDU      = (24156 × 8) / 130e6       = 1486.52 µs
+T_data      = 40 + 1486.52              = 1526.52 µs
+T_ACK       = 40.86 µs
+
+Cycle       = 34 + 67.5 + 1526.52 + 16 + 40.86 = 1684.88 µs
+Throughput  = 192000 / 1684.88 ≈ 65.55 Mbps
+```
+
+> A-MSDU saves N-1 MAC headers vs. A-MPDU → slightly higher throughput. But A-MPDU allows per-MPDU retransmission on error, making it more robust in practice.
+
+---
+
+#### 10.9 Summary Table
+
+| Ex | Setup | Result |
+|----|-------|--------|
+| 1 | 802.11a, CSMA/CA, IP=1500 B | **30.8 Mbps** |
+| 1 | 802.11a, CSMA/CA, IP=500 B | **16.6 Mbps** |
+| 2 | 802.11a, CSMA/CA + RTS/CTS, IP=1500 B | **25.6 Mbps** |
+| 3 | 802.11a, RTS/CTS + frag ≤500 B, IP=1500 B | **16.7 Mbps** |
+| 4 | 802.11a, RTS/CTS, 36 Mbps PHY, IP=1500 B | **20.4 Mbps** |
+| 5 | 802.11n, 2SS, CSMA/CA, IP=1500 B | **31.58 Mbps** |
+| 6 | 802.11n, 2SS, A-MPDU, N=16 × 1500 B | **64.29 Mbps** |
+| 6 | 802.11n, 2SS, A-MSDU, N=16 × 1500 B | **65.55 Mbps** |
+
+**Key takeaways:**
+- Small packets → same fixed overhead, less useful data → low efficiency
+- RTS/CTS adds ~77 µs per cycle → hurts single-sender throughput, helps multi-sender
+- Fragmentation always reduces throughput (more headers per useful byte)
+- Lower PHY rate → longer T_data → lower throughput (Ex 4 vs. Ex 2)
+- 802.11n larger PHY header (40 µs) partially offsets the higher PHY rate gain (Ex 5 vs. Ex 1)
+- Frame aggregation doubles throughput by amortising MAC/PHY overhead over many packets (Ex 6)
 ---
 
 ## PART 2: KEY FORMULAS REFERENCE
