@@ -902,18 +902,33 @@ b_k(v) = −d_k   if v = s_k   (source node of commodity k)
 
 ---
 
-**Constraint 3: Delay**
+**Constraint 3: Delay (max path delay ≤ D_max)**
+
+The problem requires that **every packet** of commodity k arrives within D_max — this is a *maximum* path delay constraint, not an average.
+
+**Why a simple linear formula like `Σ d(a)·f^k(a) ≤ D_max·d_k` is NOT correct:**
+
+That would only constrain the *weighted average* delay across all paths used. Example with D_max = 30 ms:
+
+| Path used | Delay | Flow |
+|-----------|-------|------|
+| v₁→v₇→v₃ | 10 ms | 1 Gbit/s |
+| v₁→v₂→v₃ | 50 ms | 1 Gbit/s |
+
+Average = (1×10 + 1×50) / 2 = 30 ms ≤ 30 ✓ — but path 2 has delay 50 ms > D_max. Real-time packets on that path arrive late. The average constraint is too weak.
+
+**The correct formulation — pre-processing the graph:**
+
+Before writing the LP, remove any arc a = (u→v) that *cannot* be part of any delay-feasible path for commodity k. Specifically, keep arc a for commodity k only if:
 ```
-∀k∈K:   Σ_{a∈A}  d(a) · f^k(a)  ≤  D_max · d_k
+min_delay(s_k → u)  +  d(a)  +  min_delay(v → t_k)  ≤  D_max
+```
+(compute both shortest-delay distances with Dijkstra on d(a) weights). Then set:
+```
+∀a not satisfying the above:   f^k(a)  =  0
 ```
 
-**What this says:** The total delay experienced by commodity k's traffic must not exceed D_max.
-
-*How to read it:* `d(a) · f^k(a)` is the "delay contribution" of arc a to commodity k's flow. Summing over all arcs and dividing by d_k gives the average delay per unit of traffic. So this constraint says:
-
-> **Average delay per Gbit/s of commodity k ≤ D_max**
-
-*Why "average"?* Because with fractional routing (splitting traffic across multiple paths), different parts of a flow can take different routes with different delays. This constraint limits the weighted average over all paths used.
+After this preprocessing, any flow that satisfies flow conservation in the reduced graph can be decomposed into paths — and every such path has total delay ≤ D_max by construction. The LP then implicitly enforces the maximum delay constraint through the arc restriction, without needing an explicit linear delay inequality.
 
 ---
 
@@ -941,7 +956,7 @@ MINIMISE:
 SUBJECT TO:
     [C1] Flow conservation at every node, for every commodity
     [C2] Total traffic on every arc ≤ arc capacity
-    [C3] Weighted-average delay for every commodity ≤ D_max
+    [C3] f^k(a) = 0 for arcs not on any delay-feasible path for k  (max path delay ≤ D_max)
     [C4] All flows non-negative
 ```
 
