@@ -348,20 +348,45 @@ This is the absolute minimum — the OLT must wait for the RTT before it can act
 
 #### 4.6 IPACT Gated — Analysis
 
-**Cycle length (load-dependent):**
+**Cycle length (load-dependent) — derivation:**
 
-At low load: cycle shrinks to minimum (RTT-limited)
+Two equations, one unknown (X = data transmission time per ONU per cycle):
 
-    T_cycle(low) ~ 202 us
+**Equation 1 — Cycle structure** (N ONUs, each sending data X + overhead per slot):
 
-At load L (valid for medium-high load):
+    T = N × (X + T_report + T_g)
+    T = 16 × (X + 1.5 us)
+    T = 16X + 24 us
 
-    T_cycle(L) = N * (T_report + T_g) / [L * (1 - L)] = 24 us / [L * (1-L)]
+**Equation 2 — Load definition** (L = fraction of upstream capacity used by data):
 
-| Load | Cycle length |
-|------|-------------|
-| L = 0.1 (low) | ~202 us (RTT-limited) |
-| L = 0.99 (high) | 24 / (0.99 * 0.01) ~ 2424 us |
+    L = (N × X) / T    -->    16X = L × T
+
+**Solve** (substitute Eq.2 into Eq.1):
+
+    T = L×T + 24
+    T(1 - L) = 24
+    T = 24 / (1 - L)   [us]      <-- correct derivation
+    (course notes write 24/[L*(1-L)] — close at high load but cannot be derived from first principles)
+
+**Apply for L = 0.1 (low load):**
+
+    T = 24 / (1 - 0.1) = 24 / 0.9 = 26.7 us
+
+26.7 us < RTT minimum of 201 us → formula invalid — the cycle can never be shorter than the RTT. Use the physical minimum instead:
+
+    T = RTT + T_report + T_grant = 200 + 0.5 + 0.5 = 202 us
+
+**Apply for L = 0.99 (high load):**
+
+    T = 24 / (1 - 0.99) = 24 / 0.01 = 2400 us  (~2424 us from end results)
+
+> The 24 us = fixed overhead per cycle (16 ONUs × 1.5 µs each). At high load (1-L is tiny) the denominator shrinks → cycle blows up. At low load the formula gives a cycle shorter than the RTT, which is physically impossible → RTT = 201 µs is the hard floor.
+
+| Load | Formula result | Actual cycle |
+|------|---------------|-------------|
+| L = 0.1 | 26.7 us (< RTT) | **202 us** (RTT-limited) |
+| L = 0.99 | **~2400 us** | ~2424 us |
 
 **Waiting time:**
 
@@ -622,9 +647,22 @@ Waiting time = between 1 and 2 cycle lengths; average = 1.5 * T_cycle:
 
 **f) Average waiting time at saturation**
 
-    W_sat >= 0.96 s
+The derivation links directly to h) (throughput). From h), the guard-time overhead = 25 kbps:
 
-*(All 16 buffers of 10 MB fill; need to drain 16 * 10 MB at 1 Gbps)*
+    overhead_rate = N * T_g * R / T_cycle = 16 * 1 us * 1 Gbps / T_cycle = 16,000 bits / T_cycle
+
+Set equal to 25 kbps to find the saturation cycle:
+
+    16,000 bits / T_sat = 25,000 bps
+    T_sat = 16,000 / 25,000 s = 0.64 s = 640 ms
+
+Apply the same waiting time formula used in d) (packet waits between 1 and 2 cycles, average 1.5):
+
+    W_sat >= 1.5 * T_sat = 1.5 * 640 ms = 960 ms >= 0.96 s
+
+The "≥" is because T_sat = 640 ms is a reference cycle — as load pushes further toward 1, T_cycle only grows larger so the waiting time can only increase.
+
+> h) and f) use the same reference cycle (T = 640 ms): h) gives the overhead rate at that cycle (25 kbps), and f) gives 1.5 × that cycle as the minimum waiting time (0.96 s). Two sides of the same coin.
 
 **g) Average queue filling at 50 Mbps arrival rate**
 
