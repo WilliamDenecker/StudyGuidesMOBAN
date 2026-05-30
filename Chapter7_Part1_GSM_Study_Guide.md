@@ -72,19 +72,84 @@ GSM uses **three layers** of multiple access simultaneously:
 
 #### 3.1 Overall Structure
 
-GSM network is organized into three subsystems:
+**Diagram 1 — Main call path (Radio → Core → PSTN)**
 
+```mermaid
+flowchart TD
+    MS["MS"]
+    BTS["BTS"]
+    BSC["BSC"]
+    MSC["MSC"]
+    VLR["VLR"]
+    GMSC["GMSC"]
+    HLR["HLR"]
+    PSTN["PSTN"]
+
+    subgraph RSS["Radio Subsystem (RSS)"]
+        MS
+    end
+
+    subgraph BSS["Base Station Subsystem (BSS)"]
+        BTS
+        BSC
+    end
+
+    subgraph NSS["Network and Switching Subsystem (NSS)"]
+        MSC
+        VLR
+        GMSC
+        HLR
+        EIR
+        AuC
+    end
+
+    MS <-->|"Air — 13 kbps"| BTS
+    BTS <-->|"Abis — 2 Mbps"| BSC
+    BSC <-->|"A Interface — 64 kbps/call"| MSC
+    MSC --- VLR
+    MSC <--> GMSC
+    GMSC --- HLR
+    GMSC --- VLR
+    GMSC --- EIR
+    GMSC --- AuC
+    GMSC <--> PSTN
 ```
-MS <--air--> BTS <--Abis--> BSC <--A--> MSC <---> PSTN/HLR/VLR
-                                         |
-                                       GMSC
-```
+
+
+---
+
+**Radio Subsystem (RSS)**
+Contains only the **Mobile Station (MS)** — all user hardware and software (phone + SIM card). The MS handles encoding, encryption, TDMA/FDMA timing, and user interaction.
+
+**Base Station Subsystem (BSS)**
+- **Base Transceiver Station (BTS):** the physical antenna serving a single cell. Converts 13 kbps speech from the MS up to 64 kbps (via its TRAU unit) for the backhaul, and handles modulation, encoding, frequency hopping, and timing advance. Connects to BSC over the **Abis interface** (typically 2 Mbps = ~30 calls).
+- **Base Station Controller (BSC):** manages 10–100 BTSs. Responsible for radio resource management — channel allocation, frequency reallocation, power control (2 dB steps), and intra-BSC handover. Concentrates traffic toward the MSC over the **A interface** (64 kbps per active call).
+
+**Network and Switching Subsystem (NSS)**
+- **Mobile Switching Center (MSC):** the high-performance ISDN switch at the core of GSM. Handles call setup and teardown, inter-BSS handover, paging coordination, billing, and echo cancellation (needed because GSM roundtrip delay > 180 ms). It also transfers encryption parameters from the VLR to the BSS.
+- **Visitor Location Register (VLR):** a dynamic database co-located with the MSC. Stores data only for subscribers currently in the MSC's area — copied from HLR when the MS registers. Issues TMSI numbers and the MSRN needed for call routing. Avoids constant long-distance HLR queries.
+- **Gateway Mobile Switching Center (GMSC):** the MSC connected to the PSTN. All calls entering or leaving GSM pass through here. It queries the HLR to find which MSC currently serves the called subscriber.
+- **Home Location Register (HLR):** permanent database for all subscribers of a PLMN. Stores the IMSI, MS-ISDN, subscribed services, authentication key, and (temporarily) the current VLR/MSC and MSRN. Updated every time the MS changes Location Area.
+
+**Operations Support System (OSS)**
+- **Operations and Maintenance Center (OMC):** monitors and controls the entire network — alarm handling, software updates, fault/performance management, traffic monitoring. Connects to MSC and BSC via the **O interface** (dashed lines).
+- **Equipment Identity Register (EIR):** database of IMEI numbers in three lists — White (valid), Black (stolen), Grey (malfunctioning).
+- **Authentication Center (AuC):** stores encryption keys and authentication algorithms. Often a protected part of the HLR. Protects communication over the air interface.
+
+**Interfaces at a glance**
+
+| Interface | Between | Rate / Notes |
+|-----------|---------|-------------|
+| Air Interface | MS ↔ BTS | 13 kbps speech (270.9 kbps channel bitrate) |
+| Abis | BTS ↔ BSC | 2 Mbps (≈ 30 calls) |
+| A | BSC ↔ MSC | 64 kbps per call |
+| O | OMC → MSC / BSC | Management only (dashed — not in call path) |
 
 | Subsystem | Components | Purpose |
 |-----------|-----------|---------|
-| **RSS** (Radio Subsystem) | MS, BTS | Air interface and radio |
-| **BSS** (Base Station Subsystem) | BTS + BSC | Radio resource management |
-| **NSS** (Network & Switching Subsystem) | MSC, HLR, VLR, GMSC | Switching, routing, mobility |
+| **RSS** (Radio Subsystem) | MS | User terminal and SIM |
+| **BSS** (Base Station Subsystem) | BTS + BSC | Radio access and resource management |
+| **NSS** (Network and Switching Subsystem) | MSC, VLR, GMSC, HLR | Switching, routing, mobility |
 | **OSS** (Operations Support System) | OMC, EIR, AuC | Management and security |
 
 #### 3.2 Mobile Station (MS)
