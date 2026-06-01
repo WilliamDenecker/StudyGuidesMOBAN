@@ -225,6 +225,7 @@ T_cycle = N × (T_report + T_g) / (1 − L)
 
 Check: 361 µs > T_cycle_min = 100.5 µs ✓
 
+
 ---
 
 ## (c) Average PON Packet Delay at 95 % Load
@@ -243,6 +244,16 @@ W_avg = 1.5 × T_cycle = 1.5 × 361 = 541.5 µs
 T_prop = d / v = 10 / 200,000 = 50 µs
 ```
 
+**T_W?**
+```
+T_Wmax = 10kB/2Gbps = 40us
+
+or
+
+0.95 = 8*T_P/8*(T_P + T_R + T_G)
+=> T_P = 0.95(T_R (2us) + T_G (0.25us) )/(1-0.95) = 42,75
+```
+
 **Total average PON packet delay:**
 
 ```
@@ -258,10 +269,7 @@ When W_max is capped at 5,000 bytes, every ONU can transmit at most W_max bytes 
 ```
 T_Wmax_new = 5,000 × 8 / 2×10⁹ = 20 µs
 
-L_max = T_Wmax / (T_Wmax + T_report + T_g)
-      = 20 / (20 + 0.256 + 2)
-      = 20 / 22.256
-      ≈ 89.9 %
+L_max = T_Wmax/(T_Wmax + T_R + T_G)
 ```
 
 > **Reducing W_max from 20,000 → 5,000 bytes lowers the maximum achievable load from ~97 % to ~89.9 %.** A smaller window means the guard-time and control overhead represent a larger fraction of each slot, reducing efficiency.
